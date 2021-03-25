@@ -8,24 +8,25 @@ import * as vscode from 'vscode';
 import * as api from '@cmt/api';
 import {CMakeExecutable} from '@cmt/cmake/cmake-executable';
 import * as codepages from '@cmt/code-pages';
-import {CompileCommand} from '@cmt/compdb';
+import {ConfigureTrigger} from "@cmt/cmake-tools";
+import {ArgsCompileCommand} from '@cmt/compdb';
 import {ConfigurationReader} from '@cmt/config';
 import {CMakeBuildConsumer, CompileOutputConsumer} from '@cmt/diagnostics/build';
 import {CMakeOutputConsumer} from '@cmt/diagnostics/cmake';
 import {RawDiagnosticParser} from '@cmt/diagnostics/util';
 import {ProgressMessage} from '@cmt/drivers/cms-client';
 import * as expand from '@cmt/expand';
-import {CMakeGenerator, effectiveKitEnvironment, Kit, kitChangeNeedsClean} from '@cmt/kit';
+import {CMakeGenerator, effectiveKitEnvironment, Kit, kitChangeNeedsClean, KitDetect, getKitDetect} from '@cmt/kit';
 import * as logging from '@cmt/logging';
 import paths from '@cmt/paths';
 import {fs} from '@cmt/pr';
 import * as proc from '@cmt/proc';
 import rollbar from '@cmt/rollbar';
-import * as shlex from '@cmt/shlex';
 import * as telemetry from '@cmt/telemetry';
 import * as util from '@cmt/util';
 import {ConfigureArguments, VariantOption} from '@cmt/variant';
 import * as nls from 'vscode-nls';
+import { majorVersionSemver, minorVersionSemver, parseTargetTriple, TargetTriple } from '@cmt/triple';
 
 nls.config({ messageFormat: nls.MessageFormat.bundle, bundleFormat: nls.BundleFormat.standalone })();
 const localize: nls.LocalizeFunc = nls.loadMessageBundle();
@@ -37,6 +38,11 @@ export enum CMakePreconditionProblems {
   BuildIsAlreadyRunning,
   NoSourceDirectoryFound,
   MissingCMakeListsFile
+}
+
+interface CompilerInfo {
+  name: string;
+  version: string;
 }
 
 export type CMakePreconditionProblemSolver = (e: CMakePreconditionProblems) => Promise<void>;
@@ -145,13 +151,53 @@ export abstract class CMakeDriver implements vscode.Disposable {
   }
 
   /**
+   * Compute the environment variables that apply with substitutions by expansionOptions
+   */
+  async computeExpandedEnvironment(in_env: proc.EnvironmentVariables, expanded_env:proc.EnvironmentVariables): Promise<proc.EnvironmentVariables>
+  {
+    const env = {} as {[key: string]: string};
+    const opts = this.expansionOptions;
+
+    await Promise.resolve(
+      util.objectPairs(in_env)
+      .forEach(async ([key, value]) => env[key] = await expand.expandString(value, {...opts, envOverride: expanded_env}))
+    );
+    return env;
+  }
+
+  /**
    * Get the environment variables that should be set at CMake-configure time.
    */
   async getConfigureEnvironment(): Promise<proc.EnvironmentVariables> {
-    return util.mergeEnvironment(this.getKitEnvironmentVariablesObject(),
-                                 await this.getExpandedEnvironment(),
-                                 await this.getBaseConfigureEnvironment(),
-                                 this._variantEnv);
+    let envs = this.getKitEnvironmentVariablesObject();
+    /* NOTE: By mergeEnvironment one by one to enable expanding self containd variable such as PATH properly */
+    /* If configureEnvironment and environment both configured different PATH, doing this will preserve them all */
+    envs = util.mergeEnvironment(envs, await this.computeExpandedEnvironment(this.config.environment, envs));
+    envs = util.mergeEnvironment(envs, await this.computeExpandedEnvironment(this.config.configureEnvironment, envs));
+    envs = util.mergeEnvironment(envs, await this.computeExpandedEnvironment(this._variantEnv, envs));
+    return envs;
+  }
+
+  /**
+   * Get the environment variables that should be set at CMake-build time.
+   */
+  async getCMakeBuildCommandEnvironment(in_env: proc.EnvironmentVariables): Promise<proc.EnvironmentVariables> {
+    let envs = util.mergeEnvironment(in_env, this.getKitEnvironmentVariablesObject());
+    envs = util.mergeEnvironment(envs, await this.computeExpandedEnvironment(this.config.environment, envs));
+    envs = util.mergeEnvironment(envs, await this.computeExpandedEnvironment(this.config.buildEnvironment, envs));
+    envs = util.mergeEnvironment(envs, await this.computeExpandedEnvironment(this._variantEnv, envs));
+    return envs;
+  }
+
+  /**
+   * Get the environment variables that should be set at CTest and running program time.
+   */
+  async getCTestCommandEnvironment(): Promise<proc.EnvironmentVariables> {
+    let envs = this.getKitEnvironmentVariablesObject();
+    envs = util.mergeEnvironment(envs, await this.computeExpandedEnvironment(this.config.environment, envs));
+    envs = util.mergeEnvironment(envs, await this.computeExpandedEnvironment(this.config.testEnvironment, envs));
+    envs = util.mergeEnvironment(envs, await this.computeExpandedEnvironment(this._variantEnv, envs));
+    return envs;
   }
 
   get onProgress(): vscode.Event<ProgressMessage> {
@@ -167,30 +213,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
    */
   private _kit: Kit|null = null;
 
-  /**
-   * Get the environment and apply any needed
-   * substitutions before returning it.
-   */
-  async getExpandedEnvironment(): Promise<{[key: string]: string}> {
-    const env = {} as {[key: string]: string};
-    const opts = this.expansionOptions;
-    await Promise.resolve(util.objectPairs(this.config.environment)
-                              .forEach(async ([key, value]) => env[key] = await expand.expandString(value, opts)));
-    return env;
-  }
-
-  /**
-   * Get the configure environment and apply any needed
-   * substitutions before returning it.
-   */
-  async getBaseConfigureEnvironment(): Promise<{[key: string]: string}> {
-    const config_env = {} as {[key: string]: string};
-    const opts = this.expansionOptions;
-    await Promise.resolve(
-        util.objectPairs(this.config.configureEnvironment)
-            .forEach(async ([key, value]) => config_env[key] = await expand.expandString(value, opts)));
-    return config_env;
-  }
+  private _kitDetect: KitDetect|null = null;
 
   /**
    * Get the vscode root workspace folder.
@@ -206,18 +229,29 @@ export abstract class CMakeDriver implements vscode.Disposable {
    * The options that will be passed to `expand.expandString` for this driver.
    */
   get expansionOptions(): expand.ExpansionOptions {
-    const ws_root = this.workspaceFolder || '.';
+    const ws_root = util.lightNormalizePath(this.workspaceFolder || '.');
+    const target: Partial<TargetTriple> = parseTargetTriple(this._kitDetect?.triple ?? '') ?? {};
+    const version = this._kitDetect?.version ?? '0.0';
 
     // Fill in default replacements
     const vars: expand.ExpansionVars = {
-      workspaceRoot: ws_root,
-      workspaceFolder: ws_root,
-      buildType: this.currentBuildType,
-      workspaceRootFolderName: path.basename(ws_root),
-      workspaceFolderBasename: path.basename(ws_root),
-      generator: this.generatorName || 'null',
-      userHome: paths.userHome,
       buildKit: this._kit ? this._kit.name : '__unknownkit__',
+      buildType: this.currentBuildType,
+      generator: this.generatorName || 'null',
+      workspaceFolder: ws_root,
+      workspaceFolderBasename: path.basename(ws_root),
+      workspaceHash: util.makeHashString(ws_root),
+      workspaceRoot: ws_root,
+      workspaceRootFolderName: path.basename(ws_root),
+      userHome: paths.userHome,
+      buildKitVendor: this._kitDetect?.vendor ?? '__unknow_vendor__',
+      buildKitTriple: this._kitDetect?.triple ?? '__unknow_triple__',
+      buildKitVersion: version,
+      buildKitHostOs: process.platform,
+      buildKitTargetOs: target.targetOs ?? '__unknow_target_os__',
+      buildKitTargetArch: target.targetArch ?? '__unknow_target_arch__',
+      buildKitVersionMajor: majorVersionSemver(version),
+      buildKitVersionMinor: minorVersionSemver(version),
       // DEPRECATED EXPANSION: Remove this in the future:
       projectName: 'ProjectName',
     };
@@ -261,34 +295,29 @@ export abstract class CMakeDriver implements vscode.Disposable {
    * Launch the given compilation command in an embedded terminal.
    * @param cmd The compilation command from a compilation database to run
    */
-  runCompileCommand(cmd: CompileCommand): vscode.Terminal {
-    if ('command' in cmd) {
-      const args = [...shlex.split(cmd.command)];
-      return this.runCompileCommand({directory: cmd.directory, file: cmd.file, arguments: args});
-    } else {
-      const env = this.getEffectiveSubprocessEnvironment();
-      const key = `${cmd.directory}${JSON.stringify(env)}`;
-      let existing = this._compileTerms.get(key);
-      if (existing && this.config.clearOutputBeforeBuild) {
-        this._compileTerms.delete(key);
-        existing.dispose();
-        existing = undefined;
-      }
-      if (!existing) {
-        const shellPath = process.platform === 'win32' ? 'cmd.exe' : undefined;
-        const term = vscode.window.createTerminal({
-          name: localize('file.compilation', 'File Compilation'),
-          cwd: cmd.directory,
-          env,
-          shellPath,
-        });
-        this._compileTerms.set(key, term);
-        existing = term;
-      }
-      existing.show();
-      existing.sendText(cmd.arguments.map(s => shlex.quote(s)).join(' ') + '\r\n');
-      return existing;
+  runCompileCommand(cmd: ArgsCompileCommand): vscode.Terminal {
+    const env = this.getEffectiveSubprocessEnvironment();
+    const key = `${cmd.directory}${JSON.stringify(env)}`;
+    let existing = this._compileTerms.get(key);
+    if (existing && this.config.clearOutputBeforeBuild) {
+      this._compileTerms.delete(key);
+      existing.dispose();
+      existing = undefined;
     }
+    if (!existing) {
+      const shellPath = process.platform === 'win32' ? 'cmd.exe' : undefined;
+      const term = vscode.window.createTerminal({
+        name: localize('file.compilation', 'File Compilation'),
+        cwd: cmd.directory,
+        env,
+        shellPath,
+      });
+      this._compileTerms.set(key, term);
+      existing = term;
+    }
+    existing.show();
+    existing.sendText(cmd.command + '\r\n');
+    return existing;
   }
 
   /**
@@ -325,6 +354,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
 
   private async _setKit(kit: Kit, preferredGenerators: CMakeGenerator[]): Promise<void> {
     this._kit = Object.seal({...kit});
+    this._kitDetect = await getKitDetect(this._kit);
     log.debug(localize('cmakedriver.kit.set.to', 'CMakeDriver Kit set to {0}', kit.name));
     this._kitEnvironmentVariables = await effectiveKitEnvironment(kit, this.expansionOptions);
 
@@ -381,7 +411,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
    * @param keywordSetting Variant Keywords for identification of a variant option
    */
   async setVariant(opts: VariantOption, keywordSetting: Map<string, string>|null) {
-    log.debug(localize('setting.new.variant', 'Setting new variant {0}', opts.long || '(Unnamed)'));
+    log.debug(localize('setting.new.variant', 'Setting new variant {0}', opts.short || '(Unnamed)'));
     this._variantBuildType = opts.buildType || this._variantBuildType;
     this._variantConfigureSettings = opts.settings || this._variantConfigureSettings;
     this._variantLinkage = opts.linkage || null;
@@ -601,7 +631,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
    * Perform a clean configure. Deletes cached files before running the config
    * @param consumer The output consumer
    */
-  public async cleanConfigure(extra_args: string[], consumer?: proc.OutputConsumer): Promise<number> {
+  public async cleanConfigure(trigger: ConfigureTrigger, extra_args: string[], consumer?: proc.OutputConsumer): Promise<number> {
     if (this.configRunning) {
       await this.preconditionHandler(CMakePreconditionProblems.ConfigureIsAlreadyRunning);
       return -1;
@@ -614,10 +644,285 @@ export abstract class CMakeDriver implements vscode.Disposable {
     await this.doPreCleanConfigure();
     this.configRunning = false;
 
-    return this.configure(extra_args, consumer);
+    return this.configure(trigger, extra_args, consumer);
   }
 
-  async configure(extra_args: string[], consumer?: proc.OutputConsumer): Promise<number> {
+  async testCompilerVersion(program: string, cwd: string, arg: string | undefined,
+                            regexp: RegExp, captureGroup: number): Promise<string | undefined> {
+    const args = [];
+    if (arg) {
+      args.push(arg);
+    }
+    const child = this.executeCommand(program, args, undefined, {silent: true, cwd});
+    try {
+      const result = await child.result;
+      console.log(localize('command.version.test.return.code', 'Command version test return code {0}', nullableValueToString(result.retc)));
+      // Various compilers will output into stdout, others in stderr.
+      // It's safe to concat them into one string to search in, since it's enough to analyze
+      // the first match (stderr can't print a different version than stdout).
+      const versionLine = result.stderr.concat(result.stdout);
+      const match = regexp.exec(versionLine);
+      // Make sure that all the regexp in compilerAllowList are written in a way that match[2] is the indeed the version.
+      // This number may change in future as we add more cases and index 2 might be difficult to ensure for all of them.
+      return match ? match[captureGroup] : "error";
+    } catch (e) {
+      const e2: NodeJS.ErrnoException = e;
+      console.log(localize('compiler.version.return.code', 'Compiler version test return code {0}', nullableValueToString(e2.code)));
+      return "error";
+    }
+  }
+
+  private readonly compilerAllowList = [
+    // Most common version output (gcc and family):
+    //     gcc -v: gcc version 9.3.0 (Ubuntu 9.3.0-17ubuntu1~20.04)
+    {
+      name: "gcc",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "cc",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "g++",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "cpp",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "c++",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "dcc",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "eccp",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "edgcpfe",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "mcc",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "tcc",
+      versionSwitch: "-v",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    // cl does not have a version switch but it outputs the compiler version on stderr
+    // when no source files arguments are given
+    {
+      name: "cl",
+      versionSwitch: undefined,
+      versionOutputRegexp: ".* Compiler Version (.*) for .*",
+      captureGroup: 1
+    },
+    // gpp --version: gpp 2.25
+    {
+      name: "gpp",
+      versionSwitch: "--version",
+      versionOutputRegexp: "gpp ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "icc",
+      versionSwitch: "-V",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "kcc",
+      versionSwitch: "-V",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "pgc++",
+      versionSwitch: "-V",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "aCC",
+      versionSwitch: "-V",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "armcc",
+      versionSwitch: "--version_number",
+      versionOutputRegexp: ".*",
+      captureGroup: 1
+    },
+    {
+      name: "bcc32",
+      versionSwitch: "--version",
+      versionOutputRegexp: ".* C\\+\\+ ([^\\s]+) for .*",
+      captureGroup: 1
+    },
+    {
+      name: "bcc32c",
+      versionSwitch: "--version",
+      versionOutputRegexp: ".* C\\+\\+ ([^\\s]+) for .*",
+      captureGroup: 1
+    },
+    {
+      name: "bcc64",
+      versionSwitch: "--version",
+      versionOutputRegexp: ".* C\\+\\+ ([^\\s]+) for .*",
+      captureGroup: 1
+    },
+    {
+      name: "bcca",
+      versionSwitch: "--version",
+      versionOutputRegexp: ".* C\\+\\+ ([^\\s]+) for .*",
+      captureGroup: 1
+    },
+    {
+      name: "bccios",
+      versionSwitch: "--version",
+      versionOutputRegexp: ".* C\\+\\+ ([^\\s]+) for .*",
+      captureGroup: 1
+    },
+    {
+      name: "bccosx",
+      versionSwitch: "--version",
+      versionOutputRegexp: ".* C\\+\\+ ([^\\s]+) for .*",
+      captureGroup: 1
+    },
+    // clang -v: clang version 10.0.0-4ubuntu1
+    {
+      name: "clang",
+      versionSwitch: "-v",
+      versionOutputRegexp: "(Apple LLVM|clang) version (.*)- ",
+      captureGroup: 2
+    },
+    {
+      name: "clang-cl",
+      versionSwitch: "-v",
+      versionOutputRegexp: "(Apple LLVM|clang) version (.*)- ",
+      captureGroup: 2
+    },
+    {
+      name: "clang++",
+      versionSwitch: "-v",
+      versionOutputRegexp: "(Apple LLVM|clang) version (.*)- ",
+      captureGroup: 2
+    },
+    {
+      name: "armclang",
+      versionSwitch: "-v",
+      versionOutputRegexp: "(Apple LLVM|clang) version (.*)- ",
+      captureGroup: 2
+    },
+    {
+      name: "openCC",
+      versionSwitch: "--version",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    {
+      name: "pathCC",
+      versionSwitch: "--version",
+      versionOutputRegexp: "version ([^\\s]+)",
+      captureGroup: 1
+    },
+    // We don't know of version switches for the following compilers so define only the compiler name
+    {
+      name: "dmc",
+      versionSwitch: undefined,
+      versionOutputRegexp: undefined
+    },
+    {
+      name: "tpp",
+      versionSwitch: undefined,
+      versionOutputRegexp: undefined
+    },
+    {
+      name: "vac++",
+      versionSwitch: undefined,
+      versionOutputRegexp: undefined
+    },
+    {
+      name: "xlc++",
+      versionSwitch: undefined,
+      versionOutputRegexp: undefined
+    }
+  ];
+
+  async getCompilerVersion(compilerPath: string) : Promise<CompilerInfo> {
+    // Compiler name and path as coming from the kit.
+    const compilerName = path.parse(compilerPath).name;
+    const compilerDir = path.parse(compilerPath).dir;
+
+    // Find an equivalent in the compilers allowed list.
+    // To avoid finding "cl" instead of "clang" or "g++" instead of "clang++",
+    // sort the array from lengthier to shorter, so that the find operation
+    // would return the most precise match.
+    // The find condition must be "includes" instead of "equals"
+    // (which wouldn't otherwise need the sort) to avoid implementing separate handling
+    // for compiler file name prefixes and suffixes related to targeted architecture.
+    const sortedCompilerAllowList = this.compilerAllowList.sort((a, b) => {
+      return b.name.length - a.name.length;
+    });
+    const compiler = sortedCompilerAllowList.find(comp => compilerName.includes(comp.name));
+
+    // Mask any unrecognized compiler as "other" to hide private information
+    let allowedCompilerName = compiler ? compiler.name : "other";
+
+    // If we recognize the compiler or not, we can still include information about triplet names cross compilers
+    if (compilerName.includes("aarch64")) {
+      allowedCompilerName += "-aarch64";
+    } else if (compilerName.includes("arm64")) {
+      allowedCompilerName += "-arm64";
+    } else if (compilerName.includes("arm")) {
+      allowedCompilerName += "-arm";
+    }
+    if (compilerName.includes("eabi")) {
+      allowedCompilerName += "-eabi";
+    }
+
+    // If we don't have a regexp, we can't obtain the compiler version information.
+    // With an undefined switch we still can get the version information (if regexp is defined),
+    // since some compilers can output their version without a specific switch.
+    let version;
+    if (compiler?.versionOutputRegexp) {
+      version = await this.testCompilerVersion(compilerName, compilerDir, compiler?.versionSwitch,
+                                               RegExp(compiler.versionOutputRegexp, "mgi"), compiler.captureGroup) || "unknown";
+    } else {
+      version = "unknown";
+    }
+
+    return {name: allowedCompilerName, version};
+  }
+
+  async configure(trigger: ConfigureTrigger, extra_args: string[], consumer?: proc.OutputConsumer, withoutCmakeSettings:boolean = false): Promise<number> {
     if (this.configRunning) {
       await this.preconditionHandler(CMakePreconditionProblems.ConfigureIsAlreadyRunning);
       return -1;
@@ -639,7 +944,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
       }
 
       const common_flags = ['--no-warn-unused-cli'].concat(extra_args, this.config.configureArgs);
-      const define_flags = this.generateCMakeSettingsFlags();
+      const define_flags = withoutCmakeSettings ? [] : this.generateCMakeSettingsFlags();
       const init_cache_flags = this.generateInitCacheFlags();
 
       // Get expanded configure environment
@@ -665,7 +970,36 @@ export abstract class CMakeDriver implements vscode.Disposable {
         CMakeExecutableVersion: cmakeVersion ? `${cmakeVersion.major}.${cmakeVersion.minor}.${cmakeVersion.patch}` : '',
         CMakeGenerator: this.generatorName || '',
         ConfigType: this.isMultiConf ? 'MultiConf' : this.currentBuildType || '',
+        Toolchain: this._kit?.toolchainFile ? "true" : "false", // UseToolchain?
+        Trigger: trigger
       };
+
+      if (this._kit?.compilers) {
+        let cCompilerVersion;
+        let cppCompilerVersion;
+        if (this._kit.compilers["C"]) {
+          cCompilerVersion = await this.getCompilerVersion(this._kit.compilers["C"]);
+        }
+
+        if (this._kit.compilers["CXX"]) {
+          cppCompilerVersion = await this.getCompilerVersion(this._kit.compilers["CXX"]);
+        }
+
+        if (cCompilerVersion) {
+          telemetryProperties.CCompilerName = cCompilerVersion.name;
+          telemetryProperties.CCompilerVersion = cCompilerVersion.version;
+        }
+
+        if (cppCompilerVersion) {
+          telemetryProperties.CppCompilerName = cppCompilerVersion.name;
+          telemetryProperties.CppCompilerVersion = cppCompilerVersion.version;
+        }
+      }
+
+      if (this._kit?.visualStudioArchitecture) {
+        telemetryProperties.VisualStudioArchitecture = this._kit?.visualStudioArchitecture;
+      }
+
       const telemetryMeasures: telemetry.Measures = {
         Duration: timeEnd - timeStart,
       };
@@ -729,10 +1063,11 @@ export abstract class CMakeDriver implements vscode.Disposable {
       settingMap.BUILD_SHARED_LIBS = util.cmakeify(this._variantLinkage === 'shared');
     }
 
-    // Always export so that we have compile_commands.json
-    settingMap.CMAKE_EXPORT_COMPILE_COMMANDS = util.cmakeify(true);
-
     const config = vscode.workspace.getConfiguration();
+    // Export compile_commands.json
+    const exportCompileCommandsFile: boolean = config.get("cmake.exportCompileCommandsFile") === undefined ? true : (config.get("cmake.exportCompileCommandsFile") || false);
+    settingMap.CMAKE_EXPORT_COMPILE_COMMANDS = util.cmakeify(exportCompileCommandsFile);
+
     const allowBuildTypeOnMultiConfig = config.get("cmake.setBuildTypeOnMultiConfig") || false;
 
     if (!this.isMultiConf || (this.isMultiConf && allowBuildTypeOnMultiConfig)) {
@@ -916,15 +1251,13 @@ export abstract class CMakeDriver implements vscode.Disposable {
         return [];
     })();
 
-    const build_env = {} as {[key: string]: string};
-    build_env['NINJA_STATUS'] = '[%s/%t %p :: %e] ';
-    const opts = this.expansionOptions;
-    await Promise.resolve(
-        util.objectPairs(util.mergeEnvironment(this.config.buildEnvironment, await this.getExpandedEnvironment()))
-            .forEach(async ([key, value]) => build_env[key] = await expand.expandString(value, opts)));
+    const ninja_env = {} as {[key: string]: string};
+    ninja_env['NINJA_STATUS'] = '[%s/%t %p :: %e] ';
+    const build_env = await this.getCMakeBuildCommandEnvironment(ninja_env);
 
     const args = ['--build', this.binaryDir, '--config', this.currentBuildType, '--target', target]
-                     .concat(this.config.buildArgs, generator_args, this.config.buildToolArgs);
+                     .concat(this.config.buildArgs, ['--'], generator_args, this.config.buildToolArgs);
+    const opts = this.expansionOptions;
     const expanded_args_promises
         = args.map(async (value: string) => expand.expandString(value, {...opts, envOverride: build_env}));
     const expanded_args = await Promise.all(expanded_args_promises) as string[];

@@ -1,4 +1,4 @@
-import {CMakeTools} from '@cmt/cmake-tools';
+import {CMakeTools, ConfigureTrigger} from '@cmt/cmake-tools';
 import {fs} from '@cmt/pr';
 import {TestProgramResult} from '@test/helpers/testprogram/test-program-result';
 import {logFilePath} from '@cmt/logging';
@@ -10,7 +10,6 @@ import {
   getMatchingProjectKit,
   getMatchingSystemKit
 } from '@test/util';
-import {ITestCallbackContext} from 'mocha';
 import * as path from 'path';
 
 // tslint:disable:no-unused-expression
@@ -30,7 +29,7 @@ suite('Build', async () => {
   let testEnv: DefaultEnvironment;
   let compdb_cp_path: string;
 
-  suiteSetup(async function(this: Mocha.IHookCallbackContext) {
+  suiteSetup(async function(this: Mocha.Context) {
     this.timeout(100000);
 
     const build_loc = 'build';
@@ -47,23 +46,23 @@ suite('Build', async () => {
     await cmt.asyncDispose();
   });
 
-  setup(async function(this: Mocha.IBeforeAndAfterContext) {
+  setup(async function(this: Mocha.Context) {
     this.timeout(100000);
 
     cmt = await CMakeTools.create(testEnv.vsContext, testEnv.wsContext);
-    const kit = await getFirstSystemKit();
+    const kit = await getFirstSystemKit(cmt);
     console.log("Using following kit in next test: ", kit);
     await cmt.setKit(kit);
     testEnv.projectFolder.buildDirectory.clear();
   });
 
-  teardown(async function(this: Mocha.IBeforeAndAfterContext) {
+  teardown(async function(this: Mocha.Context) {
     this.timeout(100000);
     await cmt.asyncDispose();
     const logPath = logFilePath();
     testEnv.clean();
     if (await fs.exists(logPath)) {
-      if (this.currentTest.state == "failed") {
+      if (this.currentTest?.state == "failed") {
         const logContent = await fs.readFile(logPath);
         logContent.toString().split('\n').forEach(line => {
           console.log(line);
@@ -83,7 +82,7 @@ suite('Build', async () => {
   });
 
   test('Configure', async () => {
-    expect(await cmt.configure()).to.be.eq(0);
+    expect(await cmt.configureInternal(ConfigureTrigger.runTests)).to.be.eq(0);
 
     expect(testEnv.projectFolder.buildDirectory.isCMakeCachePresent).to.eql(true, 'no expected cache present');
   }).timeout(100000);
@@ -97,7 +96,7 @@ suite('Build', async () => {
 
 
   test('Configure and Build', async () => {
-    expect(await cmt.configure()).to.be.eq(0);
+    expect(await cmt.configureInternal(ConfigureTrigger.runTests)).to.be.eq(0);
     expect(await cmt.build()).to.be.eq(0);
 
     const result = await testEnv.result.getResultAsJson();
@@ -105,7 +104,7 @@ suite('Build', async () => {
   }).timeout(100000);
 
   test('Configure and Build run target', async () => {
-    expect(await cmt.configure()).to.be.eq(0);
+    expect(await cmt.configureInternal(ConfigureTrigger.runTests)).to.be.eq(0);
 
     const targets = await cmt.targets;
     const runTestTargetElement = targets.find(item => item.name === 'runTestTarget');
@@ -121,7 +120,7 @@ suite('Build', async () => {
 
   test('Configure with cache-initializer', async () => {
     testEnv.config.updatePartial({cacheInit: 'TestCacheInit.cmake'});
-    expect(await cmt.configure()).to.be.eq(0);
+    expect(await cmt.configureInternal(ConfigureTrigger.runTests)).to.be.eq(0);
     await cmt.setDefaultTarget('runTestTarget');
     expect(await cmt.build()).to.be.eq(0);
     const resultFile = new TestProgramResult(testEnv.projectFolder.buildDirectory.location, 'output_target.txt');
@@ -129,7 +128,7 @@ suite('Build', async () => {
     expect(result['cookie']).to.eq('cache-init-cookie');
   }).timeout(100000);
 
-  test('Test kit switch after missing preferred generator', async function(this: ITestCallbackContext) {
+  test('Test kit switch after missing preferred generator', async function(this: Mocha.Context) {
     // Select compiler build node dependent
     const os_compilers: {[osName: string]: {kitLabel: RegExp, compiler: string}[]} = {
       linux: [{kitLabel: /^GCC \d/, compiler: 'GNU'}, {kitLabel: /^Clang \d/, compiler: 'Clang'}],
@@ -141,19 +140,19 @@ suite('Build', async () => {
 
     // Run test
     testEnv.kitSelection.defaultKitLabel = compiler[0].kitLabel;
-    await cmt.setKit(await getMatchingSystemKit(compiler[0].kitLabel));
+    await cmt.setKit(await getMatchingSystemKit(cmt, compiler[0].kitLabel));
 
     await cmt.build();
 
     testEnv.kitSelection.defaultKitLabel = compiler[1].kitLabel;
-    await cmt.setKit(await getMatchingSystemKit(compiler[1].kitLabel));
+    await cmt.setKit(await getMatchingSystemKit(cmt, compiler[1].kitLabel));
 
     await cmt.build();
     const result1 = await testEnv.result.getResultAsJson();
     expect(result1['compiler']).to.eql(compiler[1].compiler);
   }).timeout(100000);
 
-  test('Test kit switch after missing preferred generator #512', async function(this: ITestCallbackContext) {
+  test('Test kit switch after missing preferred generator #512', async function(this: Mocha.Context) {
     // Select compiler build node dependent
     const os_compilers: {[osName: string]: {kitLabel: RegExp, generator: string}[]} = {
       linux: [
@@ -205,7 +204,7 @@ suite('Build', async () => {
   }).timeout(100000);
 
   test('Test kit switch between different preferred generators and compilers',
-       async function(this: ITestCallbackContext) {
+       async function(this: Mocha.Context) {
          // Select compiler build node dependent
          const os_compilers: {[osName: string]: {kitLabel: RegExp, compiler: string}[]} = {
            linux: [{kitLabel: /^GCC \d/, compiler: 'GNU'}, {kitLabel: /^Clang \d/, compiler: 'Clang'}],
@@ -216,11 +215,11 @@ suite('Build', async () => {
          const compiler = os_compilers[workername];
 
          testEnv.kitSelection.defaultKitLabel = compiler[0].kitLabel;
-         await cmt.setKit(await getMatchingSystemKit(compiler[0].kitLabel));
+         await cmt.setKit(await getMatchingSystemKit(cmt, compiler[0].kitLabel));
          await cmt.build();
 
          testEnv.kitSelection.defaultKitLabel = compiler[1].kitLabel;
-         await cmt.setKit(await getMatchingSystemKit(compiler[1].kitLabel));
+         await cmt.setKit(await getMatchingSystemKit(cmt, compiler[1].kitLabel));
          await cmt.build();
 
          const result1 = await testEnv.result.getResultAsJson();
@@ -229,7 +228,7 @@ suite('Build', async () => {
       .timeout(100000);
 
   test('Test kit switch between different preferred generators and same compiler',
-       async function(this: ITestCallbackContext) {
+       async function(this: Mocha.Context) {
          // Select compiler build node dependent
          const os_compilers: {[osName: string]: {kitLabel: RegExp, generator: string}[]} = {
            linux: [
@@ -262,7 +261,7 @@ suite('Build', async () => {
        })
       .timeout(100000);
 
-  test('Test kit switch kits after configure', async function(this: ITestCallbackContext) {
+  test('Test kit switch kits after configure', async function(this: Mocha.Context) {
     // Select compiler build node dependent
     const os_compilers: {[osName: string]: {kitLabel: RegExp, generator: string}[]} = {
       linux: [
@@ -286,7 +285,7 @@ suite('Build', async () => {
 
     testEnv.kitSelection.defaultKitLabel = compiler[1].kitLabel;
     await cmt.setKit(await getMatchingProjectKit(compiler[1].kitLabel, testEnv.projectFolder.location));
-    await cmt.configure();
+    await cmt.configureInternal(ConfigureTrigger.runTests);
 
     testEnv.kitSelection.defaultKitLabel = compiler[0].kitLabel;
     await cmt.setKit(await getMatchingProjectKit(compiler[0].kitLabel, testEnv.projectFolder.location));
@@ -296,7 +295,7 @@ suite('Build', async () => {
     expect(result1['cmake-generator']).to.eql(compiler[0].generator);
   }).timeout(200000);
 
-  test('Test build twice', async function(this: ITestCallbackContext) {
+  test('Test build twice', async function(this: Mocha.Context) {
     console.log('1. Build');
     expect(await cmt.build()).eq(0);
     console.log('2. Build');
@@ -304,22 +303,22 @@ suite('Build', async () => {
     await testEnv.result.getResultAsJson();
   }).timeout(100000);
 
-  test('Test build twice with clean', async function(this: ITestCallbackContext) {
+  test('Test build twice with clean', async function(this: Mocha.Context) {
     expect(await cmt.build()).eq(0);
     await cmt.clean();
     expect(await cmt.build()).eq(0);
     await testEnv.result.getResultAsJson();
   }).timeout(100000);
 
-  test('Test build twice with clean configure', async function(this: ITestCallbackContext) {
+  test('Test build twice with clean configure', async function(this: Mocha.Context) {
     expect(await cmt.build()).eq(0);
-    await cmt.cleanConfigure();
+    await cmt.cleanConfigure(ConfigureTrigger.runTests);
     expect(await cmt.build()).eq(0);
 
     await testEnv.result.getResultAsJson();
   }).timeout(100000);
 
-  test('Test build twice with rebuild configure', async function(this: ITestCallbackContext) {
+  test('Test build twice with rebuild configure', async function(this: Mocha.Context) {
     // Select compiler build node dependent
     await cmt.build();
     expect(await cmt.build()).eq(0);
@@ -331,11 +330,11 @@ suite('Build', async () => {
 
   test('Copy compile_commands.json to a pre-determined path', async () => {
     expect(await fs.exists(compdb_cp_path), 'File shouldn\'t be there!').to.be.false;
-    let retc = await cmt.configure();
+    let retc = await cmt.configureInternal(ConfigureTrigger.runTests);
     expect(retc).to.eq(0);
     expect(await fs.exists(compdb_cp_path), 'File still shouldn\'t be there').to.be.false;
     testEnv.config.updatePartial({copyCompileCommands: compdb_cp_path});
-    retc = await cmt.configure();
+    retc = await cmt.configureInternal(ConfigureTrigger.runTests);
     expect(retc).to.eq(0);
     expect(await fs.exists(compdb_cp_path), 'File wasn\'t copied').to.be.true;
   }).timeout(100000);

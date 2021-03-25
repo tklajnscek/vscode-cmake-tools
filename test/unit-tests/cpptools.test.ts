@@ -27,14 +27,14 @@ suite('CppTools tests', () => {
     expect(info.extraDefinitions).to.eql(['FOO=BAR']);
     info = parseCompileFlags(cpptoolsVersion4, ['-DFOO=BAR', '/D', 'BAZ=QUX']);
     expect(info.extraDefinitions).to.eql(['FOO=BAR', 'BAZ=QUX']);
-    expect(info.standard).to.eql('c++17');
+    expect(info.standard).to.eql(undefined);
     // Parse language standard
     info = parseCompileFlags(cpptoolsVersion4, ['-std=c++03']);
     expect(info.standard).to.eql('c++03');
     info = parseCompileFlags(cpptoolsVersion4, ['-std=gnu++14']);
     expect(info.standard).to.eql('gnu++14');
-    info = parseCompileFlags(cpptoolsVersion4, ['-std=c18']);
-    expect(info.standard).to.eql('c18');
+    info = parseCompileFlags(cpptoolsVersion4, ['-std=c17']);
+    expect(info.standard).to.eql('c17');
     // Parse target architecture
     info = parseCompileFlags(cpptoolsVersion4, ['--target=aarch64-arm-none-eabi']);
     expect(info.targetArch).to.eql('arm64');
@@ -60,7 +60,7 @@ suite('CppTools tests', () => {
     expect(info.standard).to.eql('c++03');
     info = parseCompileFlags(cpptoolsVersion3, ['-std=gnu++14']);
     expect(info.standard).to.eql('c++14');
-    info = parseCompileFlags(cpptoolsVersion3, ['-std=c18']);
+    info = parseCompileFlags(cpptoolsVersion3, ['-std=c17']);
     expect(info.standard).to.eql('c11');
   });
 
@@ -146,7 +146,8 @@ suite('CppTools tests', () => {
             }
           ]
         }]
-      }]
+      }],
+      toolchains: new Map<string, codemodel_api.CodeModelToolchain>()
     };
 
     provider.updateConfigurationData({cache, codeModel, activeTarget: 'target1', folder: here});
@@ -172,11 +173,16 @@ suite('CppTools tests', () => {
               }]
             }]
         }]
-      }]
+      }],
+      toolchains: new Map<string, codemodel_api.CodeModelToolchain>([['CXX', { path: 'path_from_toolchain_object' }]])
     };
     provider.updateConfigurationData({cache, codeModel: codeModel2, activeTarget: 'target3', folder: smokeFolder});
 
-    let configurations = await provider.provideConfigurations([uri]);
+    let configurations = await provider.provideConfigurations([vscode.Uri.file(sourceFile2)]);
+    expect(configurations.length).to.eq(1);
+    expect(configurations[0].configuration.compilerPath).to.eq('path_from_toolchain_object');
+
+    configurations = await provider.provideConfigurations([uri]);
     expect(configurations.length).to.eq(1);
     expect(configurations[0].configuration.defines).to.contain('FLAG1');
 
@@ -184,6 +190,7 @@ suite('CppTools tests', () => {
     configurations = await provider.provideConfigurations([uri]);
     expect(configurations.length).to.eq(1);
     expect(configurations[0].configuration.defines).to.contain('FLAG2');
+    expect(configurations[0].configuration.compilerPath).to.eq('clang++');
 
     provider.updateConfigurationData({cache, codeModel, activeTarget: 'all', folder: here});
     configurations = await provider.provideConfigurations([uri]);

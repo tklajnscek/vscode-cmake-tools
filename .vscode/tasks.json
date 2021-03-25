@@ -27,10 +27,10 @@
                     "background": {
                         "activeOnStart": true,
                         "beginsPattern": {
-                            "regexp": "Compilation (.*?)starting…"
+                            "regexp": "asset"
                         },
                         "endsPattern": {
-                            "regexp": "Compilation (.*?)finished"
+                            "regexp": "webpack (.*?) compiled (.*?) ms"
                         }
                     }
                 }
@@ -44,7 +44,13 @@
             "problemMatcher": [
                 "$tsc-watch"
             ],
-            "isBackground": true
+            "isBackground": true,
+            "presentation": {
+                "echo": false,
+                "reveal": "silent",
+                "showReuseMessage": false,
+                "clear": true
+            }
         }
     ]
 }

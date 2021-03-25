@@ -1,5 +1,6 @@
 import {CMakeExecutable} from '@cmt/cmake/cmake-executable';
 import {InputFileSet} from '@cmt/dirty';
+import {ConfigureTrigger} from '@cmt/cmake-tools';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -161,7 +162,12 @@ export class CMakeServerClientDriver extends codemodel.CodeModelDriver {
       return acc;
     }, new Map<string, cache.Entry>());
     this.codeModel = await client.codemodel();
-    this._codeModelChanged.fire(this.codeModel);
+
+    // Toolchain information is not available with CMake server.
+    this._codeModelChanged.fire({
+        configurations: this.codeModel.configurations,
+        toolchains: new Map<string, codemodel.CodeModelToolchain>()
+    });
   }
 
   async doRefreshExpansions(cb: () => Promise<void>): Promise<void> {
@@ -335,7 +341,7 @@ export class CMakeServerClientDriver extends codemodel.CodeModelDriver {
       if (!this.configOrBuildInProgress()) {
         if (this.config.configureOnEdit) {
           log.debug(localize('cmakelists.save.trigger.reconfigure', "Detected 'cmake.sourceDirectory' setting update, attempting automatic reconfigure..."));
-          await this.configure([]);
+          await this.configure(ConfigureTrigger.sourceDirectoryChange, []);
         } else if (this.workspaceFolder) {
           const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.workspaceFolder));
           if (folder) {
