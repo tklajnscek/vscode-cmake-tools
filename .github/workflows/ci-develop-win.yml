@@ -2,7 +2,9 @@ name: CI (Windows)
 
 on:
   push:
-    branches: [ develop ]
+    branches:
+    - develop
+    - bobbrow/windowsCI
   pull_request:
     branches: [ develop ]
 
