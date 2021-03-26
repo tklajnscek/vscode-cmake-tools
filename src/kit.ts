@@ -788,7 +788,7 @@ const VsGenerators: {[key: string]: string} = {
 };
 
 async function varsForVSInstallation(inst: VSInstallation, hostArch: string, targetArch?: string): Promise<Map<string, string>|null> {
-  console.log(`varsForVSInstallation path:'${inst.installationPath}' version:${inst.installationVersion} host arch:${hostArch} - target arch:${targetArch}`);
+  log.trace(`varsForVSInstallation path:'${inst.installationPath}' version:${inst.installationVersion} host arch:${hostArch} - target arch:${targetArch}`);
   const common_dir = path.join(inst.installationPath, 'Common7', 'Tools');
   let vcvarsScript: string = 'vcvarsall.bat';
   if (targetArch == "arm" || targetArch == "arm64") {

@@ -570,7 +570,7 @@ export class CMakeTools implements vscode.Disposable, api.CMakeToolsAPI {
           this.workspaceContext.state.activeKitName = kit.name;
           this._statusMessage.set(localize('ready.status', 'Ready'));
         } catch (error) {
-          vscode.window.showErrorMessage(localize('unable.to.set.kit', 'Unable to set kit "{0}".', error));
+          vscode.window.showErrorMessage(localize('unable.to.set.kit', 'Unable to set kit: {0}.', error.message));
           this._statusMessage.set(localize('error.on.switch.status', 'Error on switch of kit ({0})', error.message));
           this._cmakeDriver = Promise.resolve(null);
           this._activeKit = null;
