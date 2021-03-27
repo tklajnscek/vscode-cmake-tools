@@ -41,3 +41,4 @@ jobs:
           CODE_TESTS_WORKSPACE: '$(Build.SourcesDirectory)/test/extension-tests/single-root-UI/project-folder'
           CMT_TESTING: '1'
           CMT_QUIET_CONSOLE: '1'
+          CODE_DISABLE_EXTENSIONS: '1'
