@@ -34,10 +34,10 @@ jobs:
       - name: Compile Test Sources
         run: yarn run pretest
 
-      - name: Run smoke tests
+      - name: Run single-root-UI test
         run: node node_modules/vscode/bin/test
         env:
-          CODE_TESTS_PATH: '$(Build.SourcesDirectory)\out\test\smoke'
-          CODE_TESTS_WORKSPACE: '$(Build.SourcesDirectory)\test\smoke'
+          CODE_TESTS_PATH: '$(Build.SourcesDirectory)/out/test/extension-tests/single-root-UI'
+          CODE_TESTS_WORKSPACE: '$(Build.SourcesDirectory)/test/extension-tests/single-root-UI/project-folder'
           CMT_TESTING: '1'
           CMT_QUIET_CONSOLE: '1'
