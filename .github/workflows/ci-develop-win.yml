@@ -37,7 +37,7 @@ jobs:
       - name: Run single-root-UI test
         run: node node_modules/vscode/bin/test
         env:
-          CODE_TESTS_PATH: '$GITHUB_WORKSPACE/out/test/extension-tests/single-root-UI'
+          CODE_TESTS_PATH: '${{ github.workspace }}/out/test/extension-tests/single-root-UI'
           CODE_TESTS_WORKSPACE: '${{ github.workspace }}/test/extension-tests/single-root-UI/project-folder'
           CMT_TESTING: '1'
           CMT_QUIET_CONSOLE: '1'
