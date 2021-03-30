@@ -415,7 +415,9 @@ async function scanDirectory<Ret>(dir: string, mapper: (filePath: string) => Pro
     if (e.code == 'EACCESS' || e.code == 'EPERM') {
       return [];
     }
-    throw e;
+    console.log('unexpected file system error');
+    console.log(e);
+    return [];
   }
 
   const prs = await Promise.all(bins.map(b => mapper(b)));
