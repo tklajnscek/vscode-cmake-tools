@@ -22,6 +22,9 @@ jobs:
           # Set this option if you want the action to check for the latest available version that satisfies the version spec
           check-latest: true
 
+      - name: Install ninja-build tool
+        uses: seanmiddleditch/gha-setup-ninja@v3
+    
       - name: yarn install
         run: yarn install
 
@@ -39,6 +42,17 @@ jobs:
         env:
           CODE_TESTS_PATH: '${{ github.workspace }}/out/test/extension-tests/single-root-UI'
           CODE_TESTS_WORKSPACE: '${{ github.workspace }}/test/extension-tests/single-root-UI/project-folder'
+          CODE_EXTENSIONS_PATH: '${{ github.workspace }}'
+          CMT_TESTING: '1'
+          CMT_QUIET_CONSOLE: '1'
+          CODE_DISABLE_EXTENSIONS: '1'
+
+      - name: Run unit tests
+        run: node node_modules/vscode/bin/test
+        env:
+          CODE_TESTS_PATH: '${{ github.workspace }}/out/test/unit-tests'
+          CODE_TESTS_WORKSPACE: '${{ github.workspace }}/test/unit-tests/test-project-without-cmakelists'
+          CODE_EXTENSIONS_PATH: '${{ github.workspace }}'
           CMT_TESTING: '1'
           CMT_QUIET_CONSOLE: '1'
           CODE_DISABLE_EXTENSIONS: '1'
