@@ -640,7 +640,7 @@ class ExtensionManager implements vscode.Disposable {
    * Watches for changes to the kits file
    */
   private readonly _kitsWatcher = util.chokidarOnAnyChange(
-    chokidar.watch(USER_KITS_FILEPATH, {ignoreInitial: true}),
+    chokidar.watch(USER_KITS_FILEPATH, {ignoreInitial: true, followSymlinks: false}),
     _ => rollbar.takePromise(localize('rereading.kits', 'Re-reading kits'), {}, KitsController.readUserKits(this._folders.activeFolder?.cmakeTools)));
 
 

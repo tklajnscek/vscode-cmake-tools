@@ -96,7 +96,7 @@ export class KitsController {
     for (const p in folderKitsFiles) {
       log.debug(`watching folder kit path: ${p}`);
     }
-    const kitsWatcher = chokidar.watch(folderKitsFiles, {ignoreInitial: true});
+    const kitsWatcher = chokidar.watch(folderKitsFiles, {ignoreInitial: true, followSymlinks: false});
     const kitsController = new KitsController(cmakeTools, kitsWatcher);
     chokidarOnAnyChange(kitsWatcher, _ => rollbar.takePromise(localize('rereading.kits', 'Re-reading folder kits'), {},
                         kitsController.readKits(KitsReadMode.folderKits)));
