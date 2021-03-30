@@ -35,14 +35,18 @@ suite('Build', async () => {
     const build_loc = 'build';
     const exe_res = 'output.txt';
 
+    console.log('creating default environment');
     testEnv = new DefaultEnvironment('test/extension-tests/single-root-UI/project-folder', build_loc, exe_res);
     compdb_cp_path = path.join(testEnv.projectFolder.location, 'compdb_cp.json');
+    console.log('creating cmake tools object');
     cmakeTools = await CMakeTools.create(testEnv.vsContext, testEnv.wsContext);
 
     // This test will use all on the same kit.
     // No rescan of the tools is needed
     // No new kit selection is needed
+    console.log('scanning for kits');
     await vscode.commands.executeCommand('cmake.scanForKits');
+    console.log('clearing existing kit config');
     await clearExistingKitConfigurationFile();
   });
 
