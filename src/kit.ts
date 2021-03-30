@@ -383,6 +383,10 @@ export async function kitIfCompiler(bin: string, pr?: ProgressReporter): Promise
 }
 
 async function scanDirectory<Ret>(dir: string, mapper: (filePath: string) => Promise<Ret|null>): Promise<Ret[]> {
+  if (process.platform === 'win32' && dir.indexOf('AppData') > 0 && dir.indexOf('Local') > 0) {
+    log.debug(localize('skipping.scan.of.appdata', 'Skipping scan of %LocalAppData% folder'));
+    return [];
+  }
   if (!await fs.exists(dir)) {
     log.debug(localize('skipping.scan.of.not.existing.path', 'Skipping scan of not existing path {0}', dir));
     return [];
