@@ -63,6 +63,7 @@ type CMakeToolsQueryMapFn = (cmt: CMakeTools) => Thenable<string | string[] | nu
  */
 class ExtensionManager implements vscode.Disposable {
   constructor(public readonly extensionContext: vscode.ExtensionContext) {
+    log.debug(`watching user kits path: ${USER_KITS_FILEPATH}`);
     telemetry.activate();
     this._statusBar.setBuildTargetName('all');
     this._folders.onAfterAddFolder(async cmtFolder => {
@@ -638,10 +639,9 @@ class ExtensionManager implements vscode.Disposable {
   /**
    * Watches for changes to the kits file
    */
-  private readonly _kitsWatcher =
-   util.chokidarOnAnyChange(chokidar.watch(USER_KITS_FILEPATH,
-                                           {ignoreInitial: true}),
-                                           _ => rollbar.takePromise(localize('rereading.kits', 'Re-reading kits'), {}, KitsController.readUserKits(this._folders.activeFolder?.cmakeTools)));
+  private readonly _kitsWatcher = util.chokidarOnAnyChange(
+    chokidar.watch(USER_KITS_FILEPATH, {ignoreInitial: true}),
+    _ => rollbar.takePromise(localize('rereading.kits', 'Re-reading kits'), {}, KitsController.readUserKits(this._folders.activeFolder?.cmakeTools)));
 
 
   /**

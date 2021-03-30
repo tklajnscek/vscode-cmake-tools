@@ -213,6 +213,7 @@ export class VariantManager implements vscode.Disposable {
                             'cmake-variants.json',
                             '.vscode/cmake-variants.yaml',
                             '.vscode/cmake-variants.json']) {
+      log.debug(`watching variant path: ${filename}`);
       this._variantFileWatcher.add(path.join(base_path, filename));
     }
     util.chokidarOnAnyChange(
