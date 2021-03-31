@@ -11,7 +11,6 @@ import {vsInstallations} from './installs/visual-studio';
 import {expandString} from './expand';
 import {fs} from './pr';
 import * as util from '@cmt/util';
-import { env } from 'process';
 
 interface VSCMakePaths {
   cmake?: string;
@@ -20,15 +19,15 @@ interface VSCMakePaths {
 
 class WindowsEnvironment {
   get AppData(): string | undefined {
-    if (env['CMT_TESTING'] === '1') {
-      path.join(vscode.workspace.workspaceFolders![0].uri.fsPath, '.vscode');
+    if (process.env['CMT_TESTING'] === '1') {
+      return path.join(vscode.workspace.workspaceFolders![0].uri.fsPath, '.vscode');
     }
     return process.env['APPDATA'];
   }
 
   get LocalAppData(): string | undefined {
-    if (env['CMT_TESTING'] === '1') {
-      path.join(vscode.workspace.workspaceFolders![0].uri.fsPath, '.vscode');
+    if (process.env['CMT_TESTING'] === '1') {
+      return path.join(vscode.workspace.workspaceFolders![0].uri.fsPath, '.vscode');
     }
     return process.env['LOCALAPPDATA'];
   }
