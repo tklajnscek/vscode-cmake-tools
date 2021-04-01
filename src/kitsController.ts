@@ -93,9 +93,6 @@ export class KitsController {
     }
 
     const folderKitsFiles: string[] = [KitsController._workspaceKitsPath(cmakeTools.folder)].concat(await KitsController.expandAdditionalKitFiles(cmakeTools));
-    for (const p of folderKitsFiles) {
-      log.debug(`watching folder kit path: ${p}`);
-    }
     const kitsWatcher = chokidar.watch(folderKitsFiles, {ignoreInitial: true, followSymlinks: false});
     const kitsController = new KitsController(cmakeTools, kitsWatcher);
     chokidarOnAnyChange(kitsWatcher, _ => rollbar.takePromise(localize('rereading.kits', 'Re-reading folder kits'), {},

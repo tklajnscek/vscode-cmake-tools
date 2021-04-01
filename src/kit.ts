@@ -156,7 +156,7 @@ export async function getCompilerVersion(vendor: CompilerVendorEnum, binPath: st
   log.debug(localize('testing.compiler.binary', 'Testing {0} binary: {1}', vendor, binPath));
   const exec = await proc.execute(binPath, ['-v']).result;
   if (exec.retc !== 0) {
-    log.debug(localize('bad.compiler.binary', 'Bad {0} binary ("-v" returns non-zero): {1}', vendor, binPath));
+    log.debug(localize('bad.compiler.binary', 'Bad {0} binary ("-v" returns {1}): {2}', vendor, exec.retc, binPath));
     return null;
   }
   let version_re_loc: RegExp;
