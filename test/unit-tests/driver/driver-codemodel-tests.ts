@@ -48,8 +48,8 @@ export function makeCodeModelDriverTestsuite(
       kitDefault = {
         name: 'Visual Studio Community 2019',
         visualStudio: 'VisualStudio.16.0',
-        visualStudioArchitecture: 'amd64',
-        preferredGenerator: {name: 'Visual Studio 16 2019', platform: 'x64'}
+        visualStudioArchitecture: 'x64',
+        preferredGenerator: {name: 'Visual Studio 16 2019', platform: 'x64', toolset: 'host=x64'}
       } as Kit;
     } else {
       kitDefault

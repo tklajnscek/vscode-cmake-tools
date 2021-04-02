@@ -37,20 +37,5 @@ jobs:
       - name: Compile Test Sources
         run: yarn run pretest
 
-      - name: Run single-root-UI test
-        run: node node_modules/vscode/bin/test
-        env:
-          CODE_TESTS_PATH: '${{ github.workspace }}/out/test/extension-tests/single-root-UI'
-          CODE_TESTS_WORKSPACE: '${{ github.workspace }}/test/extension-tests/single-root-UI/project-folder'
-          CODE_EXTENSIONS_PATH: '${{ github.workspace }}'
-          CMT_TESTING: '1'
-          CODE_DISABLE_EXTENSIONS: '1'
-
-      - name: Run unit tests
-        run: node node_modules/vscode/bin/test
-        env:
-          CODE_TESTS_PATH: '${{ github.workspace }}/out/test/unit-tests'
-          CODE_TESTS_WORKSPACE: '${{ github.workspace }}/test/unit-tests/test-project-without-cmakelists'
-          CODE_EXTENSIONS_PATH: '${{ github.workspace }}'
-          CMT_TESTING: '1'
-          CODE_DISABLE_EXTENSIONS: '1'
+      - name: Run Tests
+        run: pwsh -NonInteractive -NoProfile -NoLogo scripts/ci.ps1

@@ -49,8 +49,8 @@ export function makeDriverTestsuite(driver_generator: (cmake: CMakeExecutable,
       kitDefault = {
         name: 'Visual Studio Community 2019',
         visualStudio: 'VisualStudio.16.0',
-        visualStudioArchitecture: 'amd64',
-        preferredGenerator: {name: 'Visual Studio 16 2019', platform: 'x64'}
+        visualStudioArchitecture: 'x64',
+        preferredGenerator: {name: 'Visual Studio 16 2019', platform: 'x64', toolset: 'host=x64'}
       } as Kit;
     } else {
       kitDefault
@@ -185,15 +185,15 @@ export function makeDriverTestsuite(driver_generator: (cmake: CMakeExecutable,
 
       // Set kit without a preferred generator
       await driver.setKit({name: 'GCC'}, []);
-      expect(await driver.cleanConfigure(ConfigureTrigger.runTests, [])).to.be.eq(0);
+      expect(await driver.cleanConfigure(ConfigureTrigger.runTests, []), 'clean configure').to.be.eq(0);
       const kit1 = driver.cmakeCacheEntries?.get('CMAKE_GENERATOR')!.value;
 
       // Set kit with a list of two default preferred generators, for comparison
       await driver.setKit({name: 'GCC'}, [{name: 'Ninja'}, {name: 'Unix Makefiles'}]);
-      expect(await driver.configure(ConfigureTrigger.runTests, [])).to.be.eq(0);
+      expect(await driver.configure(ConfigureTrigger.runTests, []), 'configure with Ninja').to.be.eq(0);
       const kit2 = driver.cmakeCacheEntries?.get('CMAKE_GENERATOR')!.value;
 
-      expect(kit1).to.be.equal(kit2);
+      expect(kit1, 'value of CMAKE_GENERATOR').to.be.equal(kit2);
     }).timeout(90000);
 
     test('Try build on empty dir', async () => {

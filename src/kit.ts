@@ -659,7 +659,7 @@ async function collectDevBatVars(devbat: string, args: string[], major_version: 
 
   if (!env || env === '') {
     log.error(localize('script.run.error',
-        'Error running:{0} with args:{1}\nOutput are:\n{2}\nBat content are:\n{3}',
+        'Error running:{0} with args:{1}\nOutput:\n{2}\nScript content:\n{3}',
         devbat, args.join(' '), output, batContent));
     return;
   }
@@ -675,9 +675,8 @@ async function collectDevBatVars(devbat: string, args: string[], major_version: 
           return acc;
         }, new Map());
   if (vars.get('INCLUDE') === '') {
-    log.error(localize('script.run.error.check',
-        'Error running:{0} with args:{1}\nCannot find INCLUDE within:\n{2}\nBat content are:\n{3}',
-        devbat, args.join(' '), env, batContent));
+    log.error(localize('script.run.error', 'Error running: {0} with args: {1}', devbat, args.join(' ')));
+    log.debug(localize('script.run.error.check', 'Cannot find INCLUDE within:\n{0}\nScript content:\n{1}', env, batContent));
     return;
   }
   log.debug(localize('ok.running', 'OK running {0} {1}, env vars: {2}', devbat, args.join(' '), JSON.stringify([...vars])));

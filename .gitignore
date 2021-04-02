@@ -4,6 +4,8 @@ dist/
 node_modules/
 out/
 test/fakebin/
+test/**/log.txt
+test/**/bin
 vscode-extensions-localization-export/
 vscode-translations-import/
 .ci-build
