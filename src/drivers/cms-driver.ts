@@ -69,6 +69,11 @@ export class CMakeServerClientDriver extends CMakeDriver {
   }
   set codeModel(v: null|cms.CodeModelContent) {
     this._codeModel = v;
+    this._codeModel?.configurations.forEach(conf => {
+      conf.projects.forEach(proj => {
+        log.debug(`[ServerAPI] Project found:\n`, JSON.stringify(proj, null, 2));
+      });
+    });
   }
 
   private readonly _codeModelChanged = new vscode.EventEmitter<null|codemodel.CodeModelContent>();

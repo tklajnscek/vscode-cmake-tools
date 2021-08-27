@@ -284,6 +284,7 @@ export class CMakeFileApiDriver extends CMakeDriver {
       }
       this._target_map = await loadConfigurationTargetMap(reply_path, codemodel_obj.jsonFile);
       this._codeModelContent = await loadExtCodeModelContent(reply_path, codemodel_obj.jsonFile);
+      this._target_map.forEach((target, debugType) => log.debug(`[FileAPI] Target found (${debugType}):\n`, JSON.stringify(target, null, 2)));
 
       // load toolchains
       const toolchains_obj = indexFile.objects.find((value: index_api.Index.ObjectKind) => value.kind === 'toolchains');
