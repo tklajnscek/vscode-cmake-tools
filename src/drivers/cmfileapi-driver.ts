@@ -334,7 +334,9 @@ export class CMakeFileApiDriver extends CMakeDriver {
   get uniqueTargets(): api.Target[] { return this.targets.reduce(targetReducer, []); }
 
   get executableTargets(): ExecutableTarget[] {
-    return this.uniqueTargets.filter(t => t.type === 'rich' && (t as api.RichTarget).targetType === 'EXECUTABLE')
+    const uniqueTargets = this.uniqueTargets;
+    log.debug('[FileApi] Unique targets', JSON.stringify(uniqueTargets, null, 2));
+    return uniqueTargets.filter(t => t.type === 'rich' && (t as api.RichTarget).targetType === 'EXECUTABLE')
         .map(t => ({
                name: t.name,
                path: (t as api.RichTarget).filepath

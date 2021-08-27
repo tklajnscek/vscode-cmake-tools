@@ -1620,7 +1620,9 @@ export class CMakeTools implements vscode.Disposable, api.CMakeToolsAPI {
         return null;
       }
     }
+    log.debug(`[setLaunchTargetByName] name=${name}`);
     const executableTargets = await this.executableTargets;
+    log.debug('[setLaunchTargetByName] executableTargets', JSON.stringify(executableTargets, null, 2));
     if (executableTargets.length === 0) {
       return null;
     } if (executableTargets.length === 1) {
@@ -1651,7 +1653,11 @@ export class CMakeTools implements vscode.Disposable, api.CMakeToolsAPI {
 
   async getCurrentLaunchTarget(): Promise<api.ExecutableTarget|null> {
     const target_name = this.workspaceContext.state.launchTargetName;
-    const target = (await this.executableTargets).find(e => e.name === target_name);
+    const targets = await this.executableTargets;
+    const target = targets.find(e => e.name === target_name);
+    log.debug(`[getCurrentLaunchTarget] target_name: ${target_name}`);
+    log.debug("[getCurrentLaunchTarget] executableTargets", JSON.stringify(targets, null, 2));
+    log.debug(`[getCurrentLaunchTarget] target:`, JSON.stringify(target, null, 2));
 
     if (!target) {
       return null;
@@ -1789,13 +1795,17 @@ export class CMakeTools implements vscode.Disposable, api.CMakeToolsAPI {
     }
 
     if (name) {
-      const found = (await this.executableTargets).find(e => e.name === name);
+      const targets = await this.executableTargets;
+      log.debug(`[prepareLaunchTargetExecutable] Looking for '${name}'`);
+      log.debug("[prepareLaunchTargetExecutable] executableTargets", JSON.stringify(targets, null, 2));
+      const found = targets.find(e => e.name === name);
       if (!found) {
         return null;
       }
       chosen = found;
     } else {
       const current = await this.getOrSelectLaunchTarget();
+      log.debug('[prepareLaunchTargetExecutable] Selected target', JSON.stringify(current, null, 2));
       if (!current) {
         return null;
       }
@@ -1817,6 +1827,7 @@ export class CMakeTools implements vscode.Disposable, api.CMakeToolsAPI {
   async getOrSelectLaunchTarget(): Promise<api.ExecutableTarget|null> {
     const current = await this.getCurrentLaunchTarget();
     if (current) {
+      log.debug('[getOrSelectLaunchTarget] Current Launch Target:', JSON.stringify(current, null, 2));
       return current;
     }
     // Ask the user if we don't already have a target
